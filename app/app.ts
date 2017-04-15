@@ -65,7 +65,7 @@ export class Server {
 
         this._express.get("/", function (req: MyRequest, res: express.Response, next: express.NextFunction) {
             req.sequelize.hash.findOne().then(hash =>
-                request.get("http://wp.liceoquadri.it/wp-content/archivio/orario/_grille.js", { headers: { "If-None-Match": hash.etag || "" } },
+                request.get("http://wp.liceoquadri.it/wp-content/archivio/orario/_grille.js", hash ? { headers: { "If-None-Match": hash.etag } } : {},
                     (error: any, response: request.RequestResponse, body: any) => {
                         if (!error) {
                             if (response.statusCode == 200) {
