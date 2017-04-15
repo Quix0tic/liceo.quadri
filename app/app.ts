@@ -71,29 +71,7 @@ export class Server {
                         if (!error) {
                             if (response.statusCode == 200) {
                                 console.log("statusCode=200")
-                                req.sequelize.hash.destroy({ truncate: true })
-                                    .then(() => {
-                                        return req.sequelize.hash.create({ etag: response.headers.etag })
-                                    })
-                                    .then(() => {
-                                        return Promise.all([
-                                            promiseOne(body),
-                                            promiseTwo()
-                                        ])
-                                    })
-                                    .then(data => {
-                                        req.sequelize.schedules.destroy({ truncate: true })
-
-                                        req.sequelize.schedules.bulkCreate(data[0].map(value => {
-                                            return {
-                                                code: value.id,
-                                                group: value.group,
-                                                name: data[1].filter(val => val.id === value.id)[0].data,
-                                                url: value.data
-                                            }
-                                        }))
-
-                                    })
+                                updateDB(req, response, body)
                                     .then(() => {
                                         fetchFromDB(req, res)
                                     })
@@ -101,7 +79,7 @@ export class Server {
                                 fetchFromDB(req, res)
                             }
                         } else {
-                            res.status(404)
+                            next(error)
                         }
                     })
             )
@@ -139,7 +117,30 @@ export class Server {
         console.info("Port " + this._port + " is now free")
     }
 }
+function updateDB(req: MyRequest, response: request.RequestResponse, body: string): Promise<SequelizeModule.ScheduleInstance[]> {
+    return req.sequelize.hash.destroy({ truncate: true })
+        .then(() => {
+            return req.sequelize.hash.create({ etag: response.headers.etag })
+        })
+        .then(() => {
+            return Promise.all([
+                promiseOne(body),
+                promiseTwo()
+            ])
+        })
+        .then(data => {
+            req.sequelize.schedules.destroy({ truncate: true })
 
+            return req.sequelize.schedules.bulkCreate(data[0].map(value => {
+                return {
+                    code: value.id,
+                    group: value.group,
+                    name: data[1].filter(val => val.id === value.id)[0].data,
+                    url: value.data
+                }
+            }))
+        })
+}
 function fetchFromDB(req: MyRequest, res: express.Response) {
     console.log("fetch from DB")
     let s = hrtime()
