@@ -64,23 +64,24 @@ export class Server {
         })
 
         this._express.get("/", function (req: MyRequest, res: express.Response, next: express.NextFunction) {
-            req.sequelize.hash.findOne().then(hash =>
+            let st = hrtime()
+            console.log()
+            req.sequelize.hash.findOne().then(hash => {
+                elapsed(st)
                 request.get("http://wp.liceoquadri.it/wp-content/archivio/orario/_grille.js", hash ? { headers: { "If-None-Match": hash.etag } } : {},
                     (error: any, response: request.RequestResponse, body: any) => {
-                        if (!error) {
-                            if (response.statusCode == 200) {
-                                updateDB(req, response, body)
-                                    .then(() => {
-                                        fetchFromDB(req, res)
-                                    })
-                            } else {
-                                fetchFromDB(req, res)
-                            }
+
+                        elapsed(st)
+                        if (response.statusCode == 200) {
+                            updateDB(req, response, body)
+                                .then(() => {
+                                    fetchFromDB(req, res, st)
+                                })
                         } else {
-                            res.status(404)
+                            fetchFromDB(req, res, st)
                         }
                     })
-            )
+            })
         })
 
         //////////////////
@@ -115,7 +116,8 @@ export class Server {
         console.info("Port " + this._port + " is now free")
     }
 }
-function updateDB(req: MyRequest, response: request.RequestResponse, body: string): Promise<SequelizeModule.ScheduleInstance[]> {
+function updateDB(req: MyRequest, response: request.RequestResponse, body: string): Promise<void> {
+    console.log("Update db")
     return req.sequelize.hash.destroy({ truncate: true })
         .then(() => {
             return req.sequelize.hash.create({ etag: response.headers.etag })
@@ -128,19 +130,19 @@ function updateDB(req: MyRequest, response: request.RequestResponse, body: strin
         })
         .then(data => {
             req.sequelize.schedules.destroy({ truncate: true })
-
-            return req.sequelize.schedules.bulkCreate(data[0].map(value => {
-                return {
-                    code: value.id,
-                    group: value.group,
-                    name: data[1].filter(val => val.id === value.id)[0].data,
-                    url: value.data
-                }
-            }))
+                .then(() => {
+                    return req.sequelize.schedules.bulkCreate(data[0].map(value => {
+                        return {
+                            code: value.id,
+                            group: value.group,
+                            name: data[1].filter(val => val.id === value.id)[0].data,
+                            url: value.data
+                        }
+                    }))
+                })
         })
 }
-function fetchFromDB(req: MyRequest, res: express.Response) {
-    let s = hrtime()
+function fetchFromDB(req: MyRequest, res: express.Response, st: [number, number]) {
     let prof: SequelizeModule.ScheduleAttribute[]
     let classi: SequelizeModule.ScheduleAttribute[]
     req.sequelize.schedules.findAll({ attributes: ["name", "url"], where: { group: 'grProf' } })
@@ -161,7 +163,12 @@ function fetchFromDB(req: MyRequest, res: express.Response) {
                 classi: classi,
                 aule: aule,
             })
+            elapsed(st)
         })
+}
+function elapsed(st: [number, number]) {
+    let s = hrtime(st)
+    console.info("Execution time (hr): %ds %dms", s[0], s[1] / 1000000);
 }
 
 function promiseOne(body: string): Promise<PromiseData[]> {
