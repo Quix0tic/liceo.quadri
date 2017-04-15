@@ -64,13 +64,11 @@ export class Server {
         })
 
         this._express.get("/", function (req: MyRequest, res: express.Response, next: express.NextFunction) {
-            console.log("GET /")
             req.sequelize.hash.findOne().then(hash =>
                 request.get("http://wp.liceoquadri.it/wp-content/archivio/orario/_grille.js", { headers: { "If-None-Match": hash.etag } },
                     (error: any, response: request.RequestResponse, body: any) => {
                         if (!error) {
                             if (response.statusCode == 200) {
-                                console.log("statusCode=200")
                                 updateDB(req, response, body)
                                     .then(() => {
                                         fetchFromDB(req, res)
@@ -79,7 +77,7 @@ export class Server {
                                 fetchFromDB(req, res)
                             }
                         } else {
-                            next(error)
+                            res.status(404)
                         }
                     })
             )
@@ -142,7 +140,6 @@ function updateDB(req: MyRequest, response: request.RequestResponse, body: strin
         })
 }
 function fetchFromDB(req: MyRequest, res: express.Response) {
-    console.log("fetch from DB")
     let s = hrtime()
     let prof: SequelizeModule.ScheduleAttribute[]
     let classi: SequelizeModule.ScheduleAttribute[]
@@ -156,7 +153,6 @@ function fetchFromDB(req: MyRequest, res: express.Response) {
             return req.sequelize.schedules.findAll({ attributes: ["name", "url"], where: { group: 'grSalle' } })
         })
         .then(aule => {
-            console.log("Execution time (hr): %dms", hrtime(s)[1] / 1000000)
             res.json({
                 base_url: "http://wp.liceoquadri.it/wp-content/archivio/orario/",
                 info_url: "http://wp.liceoquadri.it/wp-content/archivio/orario/_grille.js",
