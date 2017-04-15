@@ -60,7 +60,8 @@ export class SequelizeDatabase {
                 type: Sequelize.STRING
             },
             code: {
-                type: Sequelize.STRING
+                type: Sequelize.STRING,
+                unique: true
             }
         }, {
                 tableName: 'schedules'

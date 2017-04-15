@@ -65,57 +65,46 @@ export class Server {
 
         this._express.get("/", function (req: MyRequest, res: express.Response, next: express.NextFunction) {
             console.log("GET /")
-            request.get("http://wp.liceoquadri.it/wp-content/archivio/orario/_grille.js", { headers: { "If-None-Match": req.sequelize.hash.findOne().then(value => value.etag).catch(console.log.bind(console)) } },
-                (error: any, response: request.RequestResponse, body: any) => {
-                    if (!error) {
-                        if (response.statusCode == 200) {
-                            console.log("statusCode=200")
-                            req.sequelize.hash.findAll()
-                                .then(data => {
-                                    if (data)
-                                        data.forEach((instance) => instance.destroy())
-                                    return req.sequelize.hash.create({ etag: response.headers.etag })
-                                })
-                                .then(() => {
-                                    return Promise.all([
-                                        promiseOne(),
-                                        promiseTwo()
-                                    ])
-                                })
-                                .then(data => {
-                                    return req.sequelize.schedules.bulkCreate(data[0].map(value => {
-                                        return {
-                                            code: value.id,
-                                            group: value.group,
-                                            name: data[1].filter(val => val.id === value.id)[0].data,
-                                            url: value.data
-                                        };
-                                    }))
-                                })
-                                .then(() => {
-                                    res.json({
-                                        base_url: "http://wp.liceoquadri.it/wp-content/archivio/orario/",
-                                        info_url: "http://wp.liceoquadri.it/wp-content/archivio/orario/_grille.js",
-                                        names_url: "http://wp.liceoquadri.it/wp-content/archivio/orario/_ressource.js",
-                                        prof: req.sequelize.schedules.findAll({ attributes: ["name", "url"], where: { group: 'grProf' } }),
-                                        classi: req.sequelize.schedules.findAll({ attributes: ["name", "url"], where: { group: 'grClasse' } }),
-                                        aule: req.sequelize.schedules.findAll({ attributes: ["name", "url"], where: { group: 'grSalle' } }),
+            req.sequelize.hash.findOne().then(hash =>
+                request.get("http://wp.liceoquadri.it/wp-content/archivio/orario/_grille.js", { headers: { "If-None-Match": hash.etag } },
+                    (error: any, response: request.RequestResponse, body: any) => {
+                        if (!error) {
+                            if (response.statusCode == 200) {
+                                console.log("statusCode=200")
+                                req.sequelize.hash.destroy({ truncate: true })
+                                    .then(() => {
+                                        return req.sequelize.hash.create({ etag: response.headers.etag })
                                     })
-                                })
+                                    .then(() => {
+                                        return Promise.all([
+                                            promiseOne(body),
+                                            promiseTwo()
+                                        ])
+                                    })
+                                    .then(data => {
+                                        req.sequelize.schedules.destroy({ truncate: true })
+
+                                        req.sequelize.schedules.bulkCreate(data[0].map(value => {
+                                            return {
+                                                code: value.id,
+                                                group: value.group,
+                                                name: data[1].filter(val => val.id === value.id)[0].data,
+                                                url: value.data
+                                            }
+                                        }))
+
+                                    })
+                                    .then(() => {
+                                        fetchFromDB(req, res)
+                                    })
+                            } else {
+                                fetchFromDB(req, res)
+                            }
                         } else {
-                            res.json({
-                                base_url: "http://wp.liceoquadri.it/wp-content/archivio/orario/",
-                                info_url: "http://wp.liceoquadri.it/wp-content/archivio/orario/_grille.js",
-                                names_url: "http://wp.liceoquadri.it/wp-content/archivio/orario/_ressource.js",
-                                prof: req.sequelize.schedules.findAll({ attributes: ["name", "url"], where: { group: 'grProf' } }),
-                                classi: req.sequelize.schedules.findAll({ attributes: ["name", "url"], where: { group: 'grClasse' } }),
-                                aule: req.sequelize.schedules.findAll({ attributes: ["name", "url"], where: { group: 'grSalle' } }),
-                            })
+                            res.status(404)
                         }
-                    } else {
-                        res.status(404)
-                    }
-                });
+                    })
+            )
         })
 
         //////////////////
@@ -139,7 +128,7 @@ export class Server {
             console.info('Listening port ' + this._port)
         })
         this._database.start().then(() => {
-            console.info("Connected to database");
+            console.info("Connected to database")
         }).catch((e) => {
             console.error("Error while connecting to database: " + e)
             process.exit(1)
@@ -147,55 +136,69 @@ export class Server {
     }
 
     public stop = async () => {
-        console.info("Port " + this._port + " is now free");
+        console.info("Port " + this._port + " is now free")
     }
 }
 
-function fetch(regex: RegExp, body: string): Array<Item> {
-    const items: Array<Item> = []
-    let match
-    while (match = regex.exec(body)) {
-        items.push({ name: match[1].split("_").join(" "), url: match[2] })
-    }
-    return items;
+function fetchFromDB(req: MyRequest, res: express.Response) {
+    console.log("fetch from DB")
+    let s = hrtime()
+    let prof: SequelizeModule.ScheduleAttribute[]
+    let classi: SequelizeModule.ScheduleAttribute[]
+    req.sequelize.schedules.findAll({ attributes: ["name", "url"], where: { group: 'grProf' } })
+        .then(data => {
+            prof = data
+            return req.sequelize.schedules.findAll({ attributes: ["name", "url"], where: { group: 'grClasse' } })
+        })
+        .then(data => {
+            classi = data
+            return req.sequelize.schedules.findAll({ attributes: ["name", "url"], where: { group: 'grSalle' } })
+        })
+        .then(aule => {
+            console.log("Execution time (hr): %dms", hrtime(s)[1] / 1000000)
+            res.json({
+                base_url: "http://wp.liceoquadri.it/wp-content/archivio/orario/",
+                info_url: "http://wp.liceoquadri.it/wp-content/archivio/orario/_grille.js",
+                names_url: "http://wp.liceoquadri.it/wp-content/archivio/orario/_ressource.js",
+                prof: prof,
+                classi: classi,
+                aule: aule,
+            })
+        })
 }
 
-function promiseOne(): Promise<PromiseData[]> {
+function promiseOne(body: string): Promise<PromiseData[]> {
     return new Promise<Array<PromiseData>>((resolve, reject) => {
-        console.info("Start Promise 1")
-        let start = hrtime()
-        let match;
-        let array: Array<PromiseData> = [];
+        let match
+        const regex = /ed([pcs]\d+)p\d+s\df+\w+","(\w+)","([^"]+)/g
+        let array: Array<PromiseData> = []
 
-        while (match = /ed([pcs]\d+)p\d+s\df+\w+","(\w+)","([^"]+)/g.exec(body)) {
+        while (match = regex.exec(body)) {
             array.push({
                 id: match[1],
                 group: match[2],
                 data: match[3]
             })
         }
-        console.info("Elapsed time ms: " + hrtime(start))
-        resolve(array);
+        resolve(array)
     })
 }
 
 function promiseTwo(): Promise<PromiseData[]> {
     return new Promise<Array<PromiseData>>((resolve, reject) => {
-        console.info("Start Promise 2")
         request.get("http://wp.liceoquadri.it/wp-content/archivio/orario/_ressource.js", (error: any, response: request.RequestResponse, body: any) => {
-            let start = hrtime()
-            let match;
-            let array: Array<PromiseData> = [];
+            let match
+            const regex = /"(\w+)","(.+)","([pcs]\d+)"\);/g
+            let array: Array<PromiseData> = []
 
-            while (match = /"(\w+)","(.+)","([pcs]\d+)"\);/g.exec(body)) {
+            while (match = regex.exec(body)) {
                 array.push({
                     id: match[3],
                     group: match[1],
                     data: match[2]
                 })
             }
-            console.info("Elapsed time ms: " + hrtime(start))
-            resolve(array);
+            resolve(array)
         })
     })
 }
