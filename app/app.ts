@@ -6,45 +6,13 @@ import { hrtime } from 'process'
 
 interface PromiseData { id: string, group: string, data: string }
 
-const promises: Array<Promise<Array<PromiseData>>> = [
-    new Promise<Array<PromiseData>>((resolve, reject) => {
-        request.get("http://wp.liceoquadri.it/wp-content/archivio/orario/_grille.js", (error: any, response: request.RequestResponse, body: any) => {
-            let start = hrtime()
-            let match;
-            let array: Array<PromiseData> = [];
-
-            while (match = /ed([pcs]\d+)p\d+s\df+\w+","(\w+)","([^"]+)/g.exec(body)) {
-                array.push({
-                    id: match[1],
-                    group: match[2],
-                    data: match[3]
-                })
-            }
-            console.info("Elapsed time ms: " + hrtime(start))
-            resolve(array);
-        })
-    }),
-    new Promise<Array<PromiseData>>((resolve, reject) => {
-        request.get("http://wp.liceoquadri.it/wp-content/archivio/orario/_ressource.js", (error: any, response: request.RequestResponse, body: any) => {
-            let start = hrtime()
-            let match;
-            let array: Array<PromiseData> = [];
-
-            while (match = /"(\w+)","(.+)","([pcs]\d+)"\);/g.exec(body)) {
-                array.push({
-                    id: match[3],
-                    group: match[1],
-                    data: match[2]
-                })
-            }
-            console.info("Elapsed time ms: " + hrtime(start))
-            resolve(array);
-        })
-    })
-]
+//const promises: Array<Promise<Array<PromiseData>>> = 
 
 export interface MyRequest extends express.Request {
     sequelize: SequelizeModule.SequelizeDatabase
+}
+export interface myError extends Error {
+    statusCode?: number
 }
 
 interface Item {
@@ -86,12 +54,11 @@ export class Server {
     }
 
     public start = async () => {
-        console.log("Server running")
-        this._express.listen(process.env.PORT || this._port)
-
         this._express.disable('x-powered-by')
         this._express.disable('etag')
         this._express.disable('server')
+
+        this._express.set('trust proxy', true)
 
         this._express.use((req: MyRequest, res, next) => {
             req.sequelize = this._database
@@ -99,45 +66,115 @@ export class Server {
         })
 
         this._express.get("/", function (req: MyRequest, res: express.Response, next: express.NextFunction) {
-            request.get("http://wp.liceoquadri.it/wp-content/archivio/orario/_grille.js", { headers: { "If-None-Match": req.sequelize.hash.findOne().then(value => value.etag) } },
+            console.log("GET /")
+            request.get("http://wp.liceoquadri.it/wp-content/archivio/orario/_grille.js", { headers: { "If-None-Match": req.sequelize.hash.findOne().then(value => value.etag).catch(console.log) } },
                 (error: any, response: request.RequestResponse, body: any) => {
-                    if (response.statusCode == 200) {
-                        console.log("statusCode=200")
-                        req.sequelize.hash.find().then(data => {
-                            data.destroy()
-                                .then(value => req.sequelize.hash.create({ etag: response.headers.etag }))
-                                .then(() => Promise.all(promises).then(function (data) {
-                                    req.sequelize.schedules.bulkCreate(data[0].map(value => {
-                                        return {
-                                            code: value.id,
-                                            group: value.group,
-                                            name: data[1].filter(val => val.id === value.id)[0].data,
-                                            url: value.data
-                                        } as SequelizeModule.ScheduleAttribute;
-                                    })).then(() => {
-                                        res.json({
-                                            base_url: "http://wp.liceoquadri.it/wp-content/archivio/orario/",
-                                            info_url: "http://wp.liceoquadri.it/wp-content/archivio/orario/_grille.js",
-                                            names_url: "http://wp.liceoquadri.it/wp-content/archivio/orario/_ressource.js",
-                                            prof: req.sequelize.schedules.findAll({ attributes: ["name", "url"], where: { group: 'grProf' } }),
-                                            classi: req.sequelize.schedules.findAll({ attributes: ["name", "url"], where: { group: 'grClasse' } }),
-                                            aule: req.sequelize.schedules.findAll({ attributes: ["name", "url"], where: { group: 'grSalle' } }),
+                    if (!error) {
+                        if (response.statusCode == 200) {
+                            console.log("statusCode=200")
+                            req.sequelize.hash.findAll().then(data => {
+                                if (data)
+                                    data.forEach((instance) => instance.destroy())
+                                req.sequelize.hash.create({ etag: response.headers.etag })
+                                    .then(() => Promise.all([
+                                        new Promise<Array<PromiseData>>((resolve, reject) => {
+                                            let start = hrtime()
+                                            let match;
+                                            let array: Array<PromiseData> = [];
+
+                                            while (match = /ed([pcs]\d+)p\d+s\df+\w+","(\w+)","([^"]+)/g.exec(body)) {
+                                                array.push({
+                                                    id: match[1],
+                                                    group: match[2],
+                                                    data: match[3]
+                                                })
+                                            }
+                                            console.info("Elapsed time ms: " + hrtime(start))
+                                            resolve(array);
+                                        }),
+                                        new Promise<Array<PromiseData>>((resolve, reject) => {
+                                            request.get("http://wp.liceoquadri.it/wp-content/archivio/orario/_ressource.js", (error: any, response: request.RequestResponse, body: any) => {
+                                                let start = hrtime()
+                                                let match;
+                                                let array: Array<PromiseData> = [];
+
+                                                while (match = /"(\w+)","(.+)","([pcs]\d+)"\);/g.exec(body)) {
+                                                    array.push({
+                                                        id: match[3],
+                                                        group: match[1],
+                                                        data: match[2]
+                                                    })
+                                                }
+                                                console.info("Elapsed time ms: " + hrtime(start))
+                                                resolve(array);
+                                            })
                                         })
-                                    })
-                                }))
-                        })
+                                    ]).then(function (data) {
+                                        req.sequelize.schedules.bulkCreate(data[0].map(value => {
+                                            return {
+                                                code: value.id,
+                                                group: value.group,
+                                                name: data[1].filter(val => val.id === value.id)[0].data,
+                                                url: value.data
+                                            };
+                                        })).then(() => {
+                                            res.json({
+                                                base_url: "http://wp.liceoquadri.it/wp-content/archivio/orario/",
+                                                info_url: "http://wp.liceoquadri.it/wp-content/archivio/orario/_grille.js",
+                                                names_url: "http://wp.liceoquadri.it/wp-content/archivio/orario/_ressource.js",
+                                                prof: req.sequelize.schedules.findAll({ attributes: ["name", "url"], where: { group: 'grProf' } }),
+                                                classi: req.sequelize.schedules.findAll({ attributes: ["name", "url"], where: { group: 'grClasse' } }),
+                                                aule: req.sequelize.schedules.findAll({ attributes: ["name", "url"], where: { group: 'grSalle' } }),
+                                            })
+                                        })
+                                    }))
+                            })
+                        } else {
+                            res.json({
+                                base_url: "http://wp.liceoquadri.it/wp-content/archivio/orario/",
+                                info_url: "http://wp.liceoquadri.it/wp-content/archivio/orario/_grille.js",
+                                names_url: "http://wp.liceoquadri.it/wp-content/archivio/orario/_ressource.js",
+                                prof: req.sequelize.schedules.findAll({ attributes: ["name", "url"], where: { group: 'grProf' } }),
+                                classi: req.sequelize.schedules.findAll({ attributes: ["name", "url"], where: { group: 'grClasse' } }),
+                                aule: req.sequelize.schedules.findAll({ attributes: ["name", "url"], where: { group: 'grSalle' } }),
+                            })
+                        }
                     } else {
-                        res.json({
-                            base_url: "http://wp.liceoquadri.it/wp-content/archivio/orario/",
-                            info_url: "http://wp.liceoquadri.it/wp-content/archivio/orario/_grille.js",
-                            names_url: "http://wp.liceoquadri.it/wp-content/archivio/orario/_ressource.js",
-                            prof: req.sequelize.schedules.findAll({ attributes: ["name", "url"], where: { group: 'grProf' } }),
-                            classi: req.sequelize.schedules.findAll({ attributes: ["name", "url"], where: { group: 'grClasse' } }),
-                            aule: req.sequelize.schedules.findAll({ attributes: ["name", "url"], where: { group: 'grSalle' } }),
-                        })
+                        res.status(404)
                     }
                 });
         })
+
+        //////////////////
+        //  404 handler //
+        //////////////////
+        this._express.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
+            return res.status(404).json({
+                error: true,
+                message: 'route not found'
+            })
+        })
+        this._express.use((err: myError, req: express.Request, res: express.Response, next: express.NextFunction) => {
+            res.status(err.statusCode || 500)
+            res.json({
+                name: err.name,
+                message: err.message,
+                stack: (this._express.get('env') === 'development') ? err.stack : {}
+            })
+        })
+        this._express.listen(this._port, () => {
+            console.info('Listening port ' + this._port)
+        })
+        this._database.start().then(() => {
+            console.info("Connected to database");
+        }).catch((e) => {
+            console.error("Error while connecting to database: " + e)
+            process.exit(1)
+        })
+    }
+
+    public stop = async () => {
+        console.info("Port " + this._port + " is now free");
     }
 }
 
