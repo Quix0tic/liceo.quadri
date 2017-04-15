@@ -115,7 +115,7 @@ export class Server {
                                             url: value.data
                                         } as SequelizeModule.ScheduleAttribute;
                                     })).then(() => {
-                                        res.status(200).json({
+                                        res.json({
                                             base_url: "http://wp.liceoquadri.it/wp-content/archivio/orario/",
                                             info_url: "http://wp.liceoquadri.it/wp-content/archivio/orario/_grille.js",
                                             names_url: "http://wp.liceoquadri.it/wp-content/archivio/orario/_ressource.js",
@@ -127,7 +127,7 @@ export class Server {
                                 }))
                         })
                     } else {
-                        res.status(200).json({
+                        res.json({
                             base_url: "http://wp.liceoquadri.it/wp-content/archivio/orario/",
                             info_url: "http://wp.liceoquadri.it/wp-content/archivio/orario/_grille.js",
                             names_url: "http://wp.liceoquadri.it/wp-content/archivio/orario/_ressource.js",
